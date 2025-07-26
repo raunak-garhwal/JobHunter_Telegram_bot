@@ -1,0 +1,457 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "sendChatAction",
+        "chatId": "={{ $('Telegram Trigger1').item.json.message.from.id }}",
+        "action": "=typing"
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        256,
+        552
+      ],
+      "id": "f8f640d9-e193-4fd4-840c-e304b72e24b4",
+      "name": "Send a chat action",
+      "webhookId": "4ea39ad8-dcbb-44c8-af42-ff0413f849a8",
+      "credentials": {
+        "telegramApi": {
+          "id": "wT7YapMh9wSSWg1n",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -816,
+        500
+      ],
+      "id": "0cec5add-f39e-456a-92ed-eb9ac4d0ba42",
+      "name": "Telegram Trigger1",
+      "webhookId": "da937882-66f1-412a-b0d2-ae13653c7c52",
+      "credentials": {
+        "telegramApi": {
+          "id": "wT7YapMh9wSSWg1n",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are JobHunter, an intelligent job-search assistant specialized in fetching relevant job listings from India. Your role is to use a validated and formatted job query to fetch and return structured, actionable job data.\n\nThe user query has already been validated and optimized by a previous AI agent.\n\nYou MUST now:\n\n1. ALWAYS use the \"Google Search\" tool FIRST.\n2. Use this data for job searching: {{ $('AI Agent').item.json.output }}\n3. Parse and extract ALL job results from the search response.\n4. Return ONLY a **valid JSON array** of jobs.\n\n---\n\n🔎 SEARCH RULES:\n\n- Use the full `formattedQuery` value as-is for search.\n- Do NOT filter results before parsing.\n- Get maximum relevant results.\n- Only include jobs **posted within the last 15 days** from {{ $now }}.\n- Prefer jobs from popular portals like LinkedIn, Naukri, Indeed, etc.\n\n---\n\n📤 OUTPUT FORMAT:\n\nRespond with ONLY JSON, no explanations, no wrapping text.\n\nExample:\n[\n  {\n    \"title\": \"job title\",\n    \"company\": \"company name\",\n    \"location\": \"city, state\",\n    \"job_portal\": \"portal name\",\n    \"apply_link\": \"direct URL\",\n    \"date_posted\": \"X days ago\",\n    \"employment_type\": \"Full-time/Part-time/Contract\",\n    \"experience_required\": \"X+ Years or Fresher\",\n    \"skills_required\": \"skill1, skill2, skill3\",\n    \"salary\": \"salary range or Not specified\"\n  }\n]\n\n---\n\n🚨 MANDATORY RULES:\n\n- You MUST use the `Google Search` tool with the provided `formattedQuery`.\n- Return **at least 20 job listings**, or as many as you can find.\n- Do NOT generate mock/fake jobs — extract real ones from search results.\n- JSON only. No explanations, greetings, or notes.",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        480,
+        700
+      ],
+      "id": "e7711584-a5cc-44d6-996e-4b811e6ad7d6",
+      "name": "AI Agent1",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        512,
+        924
+      ],
+      "id": "a3e4f11a-79db-4ec1-9e79-102c4ade5694",
+      "name": "Google Gemini Chat Model1",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "kqq7hFT3I0YA61Kd",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $input.first().json.output;\n\n// Enhanced cleanup for various AI response formats\nraw = raw\n  .replace(/^```(?:json)?\\n/, '')\n  .replace(/\\n```$/, '')\n  .replace(/^(Here is the JSON:|Here is your JSON:)\\s*/, '')\n  .replace(/^(Here are the job listings:|Job listings:)\\s*/, '')\n  .replace(/^\\s*\\[?\\s*/, '') \n  .replace(/\\s*\\]?\\s*$/, '') \n  .trim();\n\n// Add brackets if missing\nif (!raw.startsWith('[')) {\n  raw = '[' + raw + ']';\n}\n\nlet jobs;\ntry {\n  jobs = JSON.parse(raw);\n} catch (err) {\n  try {\n    let fixedRaw = raw\n      .replace(/,\\s*]/g, ']')\n      .replace(/,\\s*}/g, '}')\n      .replace(/}\\s*{/g, '},{');\n    \n    jobs = JSON.parse(fixedRaw);\n  } catch (err2) {\n    throw new Error('Invalid JSON after cleanup: ' + err2.message + '\\nRaw output: ' + raw);\n  }\n}\n\n// Ensure jobs is an array\nif (!Array.isArray(jobs)) {\n  jobs = [jobs];\n}\n\n// SIMPLE LINK VALIDATION\nfunction isValidUrl(url) {\n  if (!url || typeof url !== 'string') return false;\n  \n  url = url.trim();\n  \n  // Basic checks\n  if (url.length < 4) return false;\n  if (url.includes(' ') || url.includes('\\n')) return false;\n  \n  // Must contain a dot for domain\n  if (!url.includes('.')) return false;\n  \n  // Simple URL pattern\n  return /^(https?:\\/\\/)?[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/.test(url);\n}\n\nfunction normalizeUrl(url) {\n  if (!url) return '';\n  \n  url = url.trim();\n  \n  // Add https if missing\n  if (url.startsWith('www.')) {\n    url = 'https://' + url;\n  } else if (!url.startsWith('http://') && !url.startsWith('https://')) {\n    if (url.includes('.')) {\n      url = 'https://' + url;\n    }\n  }\n  \n  return url;\n}\n\n// FILTER AND VALIDATE JOBS\nconst preferredJobs = [];\nconst otherJobs = [];\n\njobs.forEach(job => {\n  const url = job.apply_link;\n  \n  // Skip jobs without apply links\n  if (!url) return;\n  \n  // Validate and normalize URL\n  const normalizedUrl = normalizeUrl(url);\n  if (!isValidUrl(normalizedUrl)) return;\n  \n  // Update the job with normalized URL\n  job.apply_link = normalizedUrl;\n  \n  // Categorize jobs - preferred portals first\n  const portal = (job.job_portal || '').toLowerCase();\n  const link = normalizedUrl.toLowerCase();\n  \n  const isPreferred = link.includes('linkedin.com') || \n                     link.includes('indeed.com') || \n                     link.includes('naukri.com') ||\n                     portal.includes('linkedin') ||\n                     portal.includes('indeed') ||\n                     portal.includes('naukri');\n  \n  if (isPreferred) {\n    preferredJobs.push(job);\n  } else {\n    otherJobs.push(job);\n  }\n});\n\n// Combine all valid jobs - preferred first\nconst finalJobs = [...preferredJobs, ...otherJobs];\n\nconst items = [];\nif (finalJobs.length === 0) {\n  items.push({\n    json: {\n      chatId: $input.first().json.chatId,\n      text: '<b>❌ Sorry, No job listings found with valid application links.</b>\\n\\nPlease try a different keyword or location to improve your results.' ,\n      parse_mode: 'HTML',\n    }\n  });\n  return items;\n}\n\nconst chatId = $input.first().json.chatId;\nconst MAX_TEXT_LEN = 4000;\nconst sliceCount = Math.min(finalJobs.length, 20);\n\nfor (let i = 0; i < sliceCount; i++) {\n  const j = finalJobs[i];\n  \n  let text = `<b>${i+1}. ${j.title || 'No Title'}</b>\\n`;\n  \n  if (j.company) text += `🏢 <b>Company</b>: ${j.company}\\n`;\n  if (j.location) text += `📍 <b>Location</b>: ${j.location}\\n`;\n  if (j.job_portal) text += `🌐 <b>Portal</b>: ${j.job_portal}\\n`;\n  if (j.date_posted) text += `📅 <b>Posted</b>: ${j.date_posted}\\n`;\n  if (j.employment_type) text += `💼 <b>Type</b>: ${j.employment_type}\\n`;\n  if (j.experience_required) text += `⭐ <b>Experience</b>: ${j.experience_required}\\n`;\n  if (j.salary && j.salary !== 'Not specified') text += `💰 <b>Salary</b>: ${j.salary}\\n`;\n  if (j.skills_required) {\n    const skills = j.skills_required.length > 1500 ? \n      j.skills_required.substring(0, 1500) + '...' : \n      j.skills_required;\n    text += `🔧 <b>Skills</b>: ${skills}\\n`;\n  }\n  \n  text += `<a href=\"${j.apply_link}\">🔗 <b>Apply Here</b></a>\\n\\n`;\n  \n  if (text.length > MAX_TEXT_LEN) {\n    text = text.substring(0, MAX_TEXT_LEN - 20) + '\\n…(truncated)';\n  }\n  \n  items.push({\n    json: {\n      chatId,\n      text,\n      parse_mode: 'HTML',\n    }\n  });\n}\n\nreturn items;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        700
+      ],
+      "id": "0f77737f-6dbb-4fcc-9bb6-60ed346cdeda",
+      "name": "Code1",
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger1').item.json.message.from.id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1104,
+        604
+      ],
+      "id": "67fc597c-fd76-4baa-bf67-cfeed1f5a6c7",
+      "name": "Send a text message2",
+      "webhookId": "b6ea9e9a-1e09-44dd-8832-bd8477947cc4",
+      "credentials": {
+        "telegramApi": {
+          "id": "wT7YapMh9wSSWg1n",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://serpapi.com/search?engine=google_jobs&q={{ JSON.parse($('AI Agent').item.json.output)?.formattedQuery || $('Telegram Trigger1').item.json.message.text }}&location=India&gl=in&hl=en&chips=date_posted:month&api_key=1d8ba563840514b4316ca6b5c9d82a8c979e8ffa56d6e19986c7ee1d43840364",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        640,
+        924
+      ],
+      "id": "3094ced4-b576-4f63-976a-219868bab436",
+      "name": "Google Search1"
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{$json.message.text === \"/start\" ? 0 : 1}}\n"
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -592,
+        500
+      ],
+      "id": "63ddeddf-32f6-45ff-93c3-3d6590013666",
+      "name": "Switch1"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger1').item.json.message.from.id }}",
+        "text": "<b>👋 Welcome to JobHunter!</b>\n\nI'm your smart job assistant to help you discover the latest job openings across India.\n\n📌 Just send me a job title + city  \ne.g. <i>React Developer pune</i>  \n\nI’ll fetch real-time job listings for you.\n\nStart searching now — your next opportunity is one message away! 🚀",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -280,
+        352
+      ],
+      "id": "bac597e6-912f-4a56-99c4-ab1c77920855",
+      "name": "Send a text message3",
+      "webhookId": "b6ea9e9a-1e09-44dd-8832-bd8477947cc4",
+      "credentials": {
+        "telegramApi": {
+          "id": "wT7YapMh9wSSWg1n",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger1').item.json.message.from.id }}",
+        "text": "=🔍 <b>Job Search in Progress</b>\n\n⏱️ ETA: Upto 1 minute\n\n📊 Expected: 10 job listings\n\nPlease wait while I scan multiple job portals for the best opportunities.....",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        568,
+        404
+      ],
+      "id": "567ea765-1f35-4835-9799-bec79e61bfc0",
+      "name": "Send a text message4",
+      "webhookId": "b6ea9e9a-1e09-44dd-8832-bd8477947cc4",
+      "credentials": {
+        "telegramApi": {
+          "id": "wT7YapMh9wSSWg1n",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger1').item.json.message.chat.id }}",
+        "text": "<b>⚠️ Oops! Something went wrong while searching for jobs.</b>\n\nPlease try again in a moment or refine your search with a different job title or location.",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1104,
+        796
+      ],
+      "id": "ed0aba7f-425a-437f-a757-f79050857f1f",
+      "name": "Send a text message",
+      "webhookId": "b6ea9e9a-1e09-44dd-8832-bd8477947cc4",
+      "credentials": {
+        "telegramApi": {
+          "id": "wT7YapMh9wSSWg1n",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a professional job query validator and formatter for an Indian job search assistant bot.\n\nYour Goal:\nDetermine if the user’s message is a **valid job-related search**, and if so, return a clean, structured, optimized query.  \nYou must support both:\n- **Job Role Searches** (e.g., “React Developer Bangalore”)\n- **Company-Specific Searches** (e.g., “Google jobs”, “Jobs in Amazon”)\n\nUser Input: \"{{ $('Telegram Trigger1').item.json.message.text }}\"\n\nRESPONSE FORMAT\n- STRICTLY JSON ONLY (No markdown, no explanations):\n- Respond with valid **raw JSON only**\n- DO NOT use markdown or wrap response in ```json\n- DO NOT include any explanation, intro text, or comments — just the JSON\n\nIf the query is VALID:\n{\n  \"isValid\": true,\n  \"formattedQuery\": \"Optimized job search query (with jobs + location)\",\n  \"jobTitle\": \"Extracted job role OR company name\",\n  \"location\": \"City or region or default 'India'\",\n  \"searchKeywords\": \"Space-separated keywords to boost search\"\n}\n\nIf the query is INVALID (non-job related):\n{\n  \"isValid\": false,\n  \"errorMessage\": \"❌ Sorry, I can only help with job searches.\\n\\nPlease provide:\\n• A Job Title (e.g., React Developer)\\n• A Company name (e.g., Jobs in Amazon)\\n• Optional location (e.g., Bangalore)\\n\\nExamples:\\n• Software Engineer Mumbai\\n• Google Jobs\\n• Data Analyst\\n• TCS jobs Bangalore\"\n}\n\nFORMATTING RULES:\n- **ALWAYS** add the word “jobs” to the query if missing.\n- If **no location** is provided, default to `\"India\"`.\n- Recognize both job titles (e.g., “backend dev”) and **company names** (e.g., “Google”).\n- Fix typos (e.g., “develper” → “developer”), expand abbreviations (e.g., “js” → “JavaScript”).\n- Replace common short forms (e.g., “blr” → “Bangalore”, “hyd” → “Hyderabad”, “del” → “Delhi”).\n- Support formats like:\n  - \"jobs in [Company]\"\n  - \"[Company] hiring\"\n  - \"[Job Title] [Location]\"\n  - \"[Company] openings in [City]\"\n  - \"Vacancies in [Company]\"\n  - \"[Company] jobs\"\n  - \"[Company name]\"\n  - \"[Company] [Job Title] [Location]\"\n\nEXAMPLES:\n\nInput: \"react developer\"\nOutput: {\n  \"isValid\": true,\n  \"formattedQuery\": \"React Developer jobs India\",\n  \"jobTitle\": \"React Developer\",\n  \"location\": \"India\",\n  \"searchKeywords\": \"react javascript frontend developer\"\n}\n\nInput: \"data scientist mumbai\"\nOutput: {\n  \"isValid\": true,\n  \"formattedQuery\": \"Data Scientist jobs Mumbai India\",\n  \"jobTitle\": \"Data Scientist\",\n  \"location\": \"Mumbai\",\n  \"searchKeywords\": \"data science machine learning python analyst\"\n}\n\nInput: \"js dev blr\"\nOutput: {\n  \"isValid\": true,\n  \"formattedQuery\": \"JavaScript Developer jobs Bangalore India\",\n  \"jobTitle\": \"JavaScript Developer\",\n  \"location\": \"Bangalore\",\n  \"searchKeywords\": \"javascript developer frontend backend\"\n}\n\nInput: \"what is weather today\"\nOutput: {\n  \"isValid\": false,\n  \"errorMessage\": \"❌ Sorry, I can only help with job searches.\\n\\nPlease provide:\\n• Job title/role (e.g., React Developer)\\n• Specific Company roles (e.g.Jobs in TCS/Amazon)\\n• Location (optional)\\n\\nExamples:\\n• Software Engineer Mumbai\\n• Data Analyst\\n• Marketing Manager Bangalore\"\n}\n\nInput: \"jobs in amazon\" or \"amazon jobs\"\nOutput: {\n  \"isValid\": true,\n  \"formattedQuery\": \"Amazon jobs India\",\n  \"jobTitle\": \"Amazon\",\n  \"location\": \"India\",\n  \"searchKeywords\": \"amazon jobs careers hiring openings\"\n}\n\nInput: \"tcs jobs hyderabad\"\nOutput: {\n  \"isValid\": true,\n  \"formattedQuery\": \"TCS jobs Hyderabad India\",\n  \"jobTitle\": \"TCS\",\n  \"location\": \"Hyderabad\",\n  \"searchKeywords\": \"tcs jobs hiring hyderabad careers\"\n}\n\nREMEMBER:\n- No extra text\n- No markdown formatting\n- Only the JSON object as shown above",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        648
+      ],
+      "id": "b43d643f-4cf1-4944-972a-a2bc5e7c10ad",
+      "name": "AI Agent",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -272,
+        872
+      ],
+      "id": "4a1d42d5-b3c9-4806-a1c8-da256aac0582",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "kqq7hFT3I0YA61Kd",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ JSON.parse($json.output).isValid === true ? 0 : 1 }}"
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        32,
+        648
+      ],
+      "id": "1c45c137-ae83-4831-add7-c512eeb86748",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger1').item.json.message.chat.id }}",
+        "text": "={{ JSON.parse($json.output).errorMessage }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        256,
+        744
+      ],
+      "id": "c0b1c1f2-539c-434b-ac94-21b2ab3f3d2a",
+      "name": "Send a text message1",
+      "webhookId": "b6ea9e9a-1e09-44dd-8832-bd8477947cc4",
+      "credentials": {
+        "telegramApi": {
+          "id": "wT7YapMh9wSSWg1n",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Send a chat action": {
+      "main": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send a text message4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Switch1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent1": {
+      "main": [
+        [
+          {
+            "node": "Code1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Google Gemini Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code1": {
+      "main": [
+        [
+          {
+            "node": "Send a text message2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Search1": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch1": {
+      "main": [
+        [
+          {
+            "node": "Send a text message3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Send a chat action",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a text message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "94a21edb-1b7f-40fd-87fb-33ccb8c3a402",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "a5c1bb8d8eb809ddf022dac707690f7c873cc73ec63b13efd15ed2e2c3acef03"
+  },
+  "id": "iDNGPGmZpZo21FUu",
+  "tags": []
+}
